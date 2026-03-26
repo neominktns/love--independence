@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>504 generator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: "Inter", sans-serif; background: #e8e8e8; user-select: none; }
+
+        #ui {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 48px;
+            background: #D6D6D6;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 16px;
+            z-index: 100;
+        }
+
+        #ui button {
+            padding: 5px 14px;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 400;
+            border: 1px solid #aaa;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #ui button:hover { background: #f0f0f0; }
+        #ui button:disabled { opacity: 0.4; cursor: not-allowed; }
+        #ui button.primary { background: #97B8C9; border-color: #97B8C9; color: white; }
+        #ui button.primary:hover { background: #82a8bb; }
+
+        #counter { font-size: 14px; font-weight: 500; min-width: 90px; text-align: center; }
+
+        #progress-wrap {
+            flex: 1;
+            height: 6px;
+            background: #bbb;
+            border-radius: 3px;
+            overflow: hidden;
+            display: none;
+        }
+        #progress-bar { height: 100%; background: #97B8C9; width: 0%; transition: width 0.15s; }
+        #progress-text { font-size: 12px; color: #555; white-space: nowrap; }
+
+        #badge-preview {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        #badge-preview img {
+            width: 28px;
+            height: 28px;
+            object-fit: contain;
+        }
+
+        #poster-wrap {
+            padding-top: 68px;
+            padding-bottom: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+        }
+
+        #poster {
+            position: relative;
+            background: white;
+            box-shadow: 0 6px 32px rgba(0,0,0,0.18);
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <button id="btn-prev">←</button>
+    <span id="counter">1 / 504</span>
+    <button id="btn-next">→</button>
+    <div id="badge-preview"></div>
+    <button id="btn-dl">Download PNG</button>
+    <button id="btn-all" class="primary">Download all 504 as ZIP</button>
+    <div id="progress-wrap"><div id="progress-bar"></div></div>
+    <span id="progress-text"></span>
+</div>
+
+<div id="poster-wrap">
+    <div id="poster"></div>
+</div>
+
+<script type="module">
+import { folders, BADGE_PATH as _BP } from './contents/content.js';
+const BADGE_PATH = 'assets/star-badge/';
+
+// ── COMBINATIONS ────────────────────────────────────────────────────────────
+const WE_FIGHT = [
+    "we-fight-emotions.png","we-fight-sorry.png","silent-dinners.png",
+    "eat-out.png","egg-on-top.png","cheese-on-top.png","seaweed.png","sesame-oil-drizzle.png"
+];
+const WE_FIND_LOVE = [
+    "sesame-oil.png","chili-pepper.png","eyeglasses.png","medicines.png",
+    "home.png","cry.png","dads-office.png"
+];
+const WE_MISS = [
+    "chores.png","we-miss-boxer.png","happy.png","hands.png",
+    "orange-overalls.png","gray-uniform.png","purple-jacket.png","lavender-jacket.png","tv.png"
+];
+
+const COMBOS = [];
+for (const a of WE_FIGHT)
+    for (const b of WE_FIND_LOVE)
+        for (const c of WE_MISS)
+            COMBOS.push([a, b, c]);
+
+// ── PATH PRECOMPUTATION ─────────────────────────────────────────────────────
+function buildPathMap(folder) {
+    const map = {};
+    function walk(nodes, path) {
+        for (const n of nodes) {
+            const p = [...path, n];
+            if (n.done && n.badge && !map[n.badge]) map[n.badge] = p;
+            if (n.children?.length) walk(n.children, p);
+        }
+    }
+    walk(folder.children, []);
+    return map;
+}
+const pathMaps = folders.map(buildPathMap);
+
+// ── VIDEO FRAME CAPTURE ─────────────────────────────────────────────────────
+const videoCache = {};
+async function captureVideoFrame(src) {
+    if (videoCache[src]) return videoCache[src];
+    return new Promise(resolve => {
+        const v = document.createElement('video');
+        v.src = src; v.muted = true; v.playsInline = true; v.currentTime = 0.1;
+        v.addEventListener('seeked', () => {
+            const c = document.createElement('canvas');
+            c.width = v.videoWidth; c.height = v.videoHeight;
+            c.getContext('2d').drawImage(v, 0, 0);
+            const url = c.toDataURL('image/png');
+            videoCache[src] = url;
+            resolve(url);
+        }, { once: true });
+        v.addEventListener('error', () => resolve(null), { once: true });
+        v.load();
+    });
+}
+
+// ── BUILD LOG GROUPS ────────────────────────────────────────────────────────
+async function buildLogGroups(combo) {
+    const groups = [];
+    for (let i = 0; i < 3; i++) {
+        const folder = folders[i];
+        const path = pathMaps[i][combo[i]];
+        if (!path) continue;
+        const entries = [{ text: folder.label, image: null }];
+        for (const node of path) {
+            let image = node.image || null;
+            if (node.type === 'video' && node.src) {
+                image = await captureVideoFrame(node.src);
+            }
+            entries.push({ text: node.label || '', image });
+        }
+        groups.push({ color: folder.color, entries });
+    }
+    return groups;
+}
+
+// ── POSTER SIZE ─────────────────────────────────────────────────────────────
+const RATIO = 8.5 / 11;
+const vw = window.innerWidth - 80;
+const vh = window.innerHeight - 48 - 40;
+let pw, ph;
+if (vw / vh < RATIO) { pw = vw; ph = vw / RATIO; }
+else { ph = vh; pw = vh * RATIO; }
+
+const posterEl = document.getElementById('poster');
+posterEl.style.width  = pw + 'px';
+posterEl.style.height = ph + 'px';
+
+const scale = pw / 816;
+
+// ── RENDER POSTER ───────────────────────────────────────────────────────────
+// seeded random for background folder scatter
+function seedRand(seed) {
+    let s = seed;
+    return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
+}
+
+async function renderPoster(idx) {
+    const combo = COMBOS[idx];
+    const logGroups = await buildLogGroups(combo);
+
+    posterEl.innerHTML = '';
+
+    // ── 1. background: scattered folder icons ──
+    const bgDiv = document.createElement('div');
+    bgDiv.style.cssText = 'position:absolute;inset:0;overflow:hidden;opacity:0.12;pointer-events:none;z-index:1;';
+    const rng = seedRand(idx * 997 + 42);
+    for (let j = 0; j < 50; j++) {
+        const img = document.createElement('img');
+        img.src = 'assets/folder-low-res.png';
+        const sz = 28 + Math.floor(rng() * 32);
+        img.style.cssText = `position:absolute;width:${sz}px;left:${(rng()*94).toFixed(1)}%;top:${(rng()*92).toFixed(1)}%;`;
+        bgDiv.appendChild(img);
+    }
+    posterEl.appendChild(bgDiv);
+
+    // ── 2. figure ──
+    const fig = document.createElement('img');
+    fig.src = 'assets/figure.png';
+    fig.style.cssText = 'position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);height:68%;object-fit:contain;pointer-events:none;z-index:2;';
+    posterEl.appendChild(fig);
+
+    // ── 3. badges overlaid on figure ──
+    const badgeWrap = document.createElement('div');
+    badgeWrap.style.cssText = `position:absolute;left:50%;top:43%;transform:translate(-50%,-50%);width:${Math.round(pw * 0.55)}px;height:79%;pointer-events:none;z-index:3;`;
+    combo.forEach(badgeFile => {
+        const b = document.createElement('img');
+        b.src = BADGE_PATH + badgeFile;
+        b.onerror = () => b.remove();
+        b.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:bottom center;';
+        badgeWrap.appendChild(b);
+    });
+    posterEl.appendChild(badgeWrap);
+
+    // ── 4. text ──
+    const PAD = pw * 0.04;
+    const FSIZE = Math.max(10, Math.round(22 * scale));
+    const LHEIGHT = FSIZE * 1.4;
+    const rand = (a, b) => Math.random() * (b - a) + a;
+
+    const textLayer = document.createElement('div');
+    textLayer.style.cssText = `position:absolute;top:${PAD}px;left:${PAD}px;right:${PAD}px;bottom:${PAD}px;display:flex;flex-direction:column;justify-content:space-between;z-index:4;pointer-events:none;`;
+    posterEl.appendChild(textLayer);
+
+    for (const group of logGroups) {
+        if (!group.entries?.length) continue;
+        const block = document.createElement('div');
+        block.style.cssText = `font-family:"Inter",sans-serif;font-size:${FSIZE}px;font-weight:300;color:#000;line-height:${LHEIGHT}px;white-space:normal;word-break:break-word;text-align:justify;text-align-last:justify;text-shadow:0 1px 8px rgba(255,255,255,0.9),0 0px 2px rgba(255,255,255,1);`;
+
+        group.entries.forEach((entry, i) => {
+            if (i === 0) {
+                const lbl = document.createElement('span');
+                lbl.textContent = entry.text + '  ';
+                lbl.style.fontWeight = '500';
+                block.appendChild(lbl);
+                return;
+            }
+            if (entry.image) {
+                const imgEl = document.createElement('img');
+                imgEl.src = entry.image;
+                imgEl.style.cssText = `display:inline-block;vertical-align:bottom;width:auto;height:${Math.round(FSIZE * rand(2.5, 3.5))}px;object-fit:cover;margin:0 3px;opacity:0.9;border:0.35px black solid;`;
+                block.appendChild(imgEl);
+            }
+            const span = document.createElement('span');
+            span.textContent = entry.text + '  ';
+            block.appendChild(span);
+        });
+        textLayer.appendChild(block);
+    }
+
+
+}
+
+// ── BADGE PREVIEW ────────────────────────────────────────────────────────────
+const badgePreviewEl = document.getElementById('badge-preview');
+function updateBadgePreview(idx) {
+    badgePreviewEl.innerHTML = '';
+    COMBOS[idx].forEach(f => {
+        const img = document.createElement('img');
+        img.src = BADGE_PATH + f;
+        img.onerror = () => img.style.opacity = '0.2';
+        img.title = f;
+        badgePreviewEl.appendChild(img);
+    });
+}
+
+// ── UI ───────────────────────────────────────────────────────────────────────
+let current = 0;
+let busy = false;
+
+const counterEl     = document.getElementById('counter');
+const btnPrev       = document.getElementById('btn-prev');
+const btnNext       = document.getElementById('btn-next');
+const btnDl         = document.getElementById('btn-dl');
+const btnAll        = document.getElementById('btn-all');
+const progressWrap  = document.getElementById('progress-wrap');
+const progressBar   = document.getElementById('progress-bar');
+const progressText  = document.getElementById('progress-text');
+
+function updateCounter() {
+    counterEl.textContent = `${current + 1} / ${COMBOS.length}`;
+}
+
+async function goTo(idx) {
+    if (busy) return;
+    busy = true;
+    btnPrev.disabled = true;
+    btnNext.disabled = true;
+    current = idx;
+    updateCounter();
+    updateBadgePreview(idx);
+    await renderPoster(idx);
+    btnPrev.disabled = (current === 0);
+    btnNext.disabled = (current === COMBOS.length - 1);
+    busy = false;
+}
+
+btnPrev.addEventListener('click', () => { if (current > 0) goTo(current - 1); });
+btnNext.addEventListener('click', () => { if (current < COMBOS.length - 1) goTo(current + 1); });
+
+// keyboard nav
+document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft'  && current > 0)              goTo(current - 1);
+    if (e.key === 'ArrowRight' && current < COMBOS.length - 1) goTo(current + 1);
+});
+
+async function capturePoster() {
+    await new Promise(r => setTimeout(r, 600)); // let images load
+    const canvas = await html2canvas(posterEl, {
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        scale: 2,
+        logging: false
+    });
+    return canvas.toDataURL('image/png');
+}
+
+// download current
+btnDl.addEventListener('click', async () => {
+    btnDl.disabled = true;
+    btnDl.textContent = 'capturing...';
+    const dataUrl = await capturePoster();
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `combo-${String(current + 1).padStart(3, '0')}.png`;
+    a.click();
+    btnDl.textContent = 'Download PNG';
+    btnDl.disabled = false;
+});
+
+// download all as zip
+btnAll.addEventListener('click', async () => {
+    if (!confirm('This will generate all 504 PNGs and bundle them into a ZIP file. This may take 10–20 minutes. Continue?')) return;
+
+    btnAll.disabled = true;
+    btnPrev.disabled = true;
+    btnNext.disabled = true;
+    btnDl.disabled = true;
+    progressWrap.style.display = 'block';
+
+    const zip = new JSZip();
+
+    for (let i = 0; i < COMBOS.length; i++) {
+        current = i;
+        updateCounter();
+        updateBadgePreview(i);
+        await renderPoster(i);
+
+        const dataUrl = await capturePoster();
+        // strip "data:image/png;base64,"
+        const base64 = dataUrl.split(',')[1];
+        zip.file(`combo-${String(i + 1).padStart(3, '0')}.png`, base64, { base64: true });
+
+        const pct = ((i + 1) / COMBOS.length * 100).toFixed(1);
+        progressBar.style.width = pct + '%';
+        progressText.textContent = `${i + 1} / ${COMBOS.length}`;
+
+        // breathe
+        await new Promise(r => setTimeout(r, 50));
+    }
+
+    progressText.textContent = 'Bundling ZIP...';
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'badge-combos-504.zip';
+    a.click();
+    URL.revokeObjectURL(url);
+
+    progressText.textContent = '✓ Done! badge-combos-504.zip downloaded.';
+    btnAll.disabled = false;
+    btnPrev.disabled = false;
+    btnNext.disabled = false;
+    btnDl.disabled = false;
+});
+
+// init
+goTo(0);
+</script>
+</body>
+</html>
